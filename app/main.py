@@ -1,48 +1,53 @@
 import sys
 
 def main():
-    """
-    REPL for Stage 3:
-    - Show prompt "$ "
-    - Read a line
-    - If empty: show prompt again
-    - If command is 'exit' or 'quit': exit
-    - Otherwise print "<command_name>: command not found"
-    - Handle Ctrl-C (KeyboardInterrupt) by showing a fresh prompt
-    - Handle Ctrl-D (EOFError) by exiting cleanly
-    """
     while True:
         try:
-            # Read: show prompt and flush so it appears immediately
+            # Show shell prompt
             sys.stdout.write("$ ")
             sys.stdout.flush()
 
-            # Wait for user input (blocking)
+            # Read user input
             line = input()
         except EOFError:
-            # Ctrl-D (end-of-file) — exit the REPL politely with a newline
+            # Handle Ctrl+D gracefully
             print()
             break
         except KeyboardInterrupt:
-            # Ctrl-C — don't exit the shell; print a newline and show prompt again
+            # Handle Ctrl+C — show new line and prompt again
             print()
             continue
 
-        # Trim whitespace
+        # Remove leading/trailing spaces
         line = line.strip()
 
-        # If the user pressed Enter on an empty line, just loop and show prompt again
+        # Empty input → show prompt again
         if not line:
             continue
 
-        # Allow explicit exits
-        if line in ("exit", "quit"):
-            break
+        # Split into tokens (command + arguments)
+        tokens = line.split()
+        command = tokens[0]
 
-        # Eval/Print: for this stage treat all commands as invalid.
-        # Print the command *name* (first token) as required by tests.
-        command_name = line.split()[0]
-        print(f"{command_name}: command not found")
+        # --- Handle 'exit' builtin ---
+        if command == "exit":
+            # Default exit code = 0
+            exit_code = 0
+
+            # If user provided an argument (like 'exit 1')
+            if len(tokens) > 1:
+                try:
+                    exit_code = int(tokens[1])
+                except ValueError:
+                    # Invalid argument (non-numeric)
+                    print(f"exit: {tokens[1]}: numeric argument required")
+                    exit_code = 1  # Standard shell behavior
+
+            # Terminate shell immediately
+            sys.exit(exit_code)
+
+        # --- Handle all other invalid commands ---
+        print(f"{command}: command not found")
 
 if __name__ == "__main__":
     main()
