@@ -1,37 +1,35 @@
 import sys
 
+# Keep a set of builtins for easy lookup
+BUILTINS = {"exit", "echo", "type"}
+
 def main():
     while True:
         try:
-            # Show prompt
+            # --- Prompt & Input ---
             sys.stdout.write("$ ")
             sys.stdout.flush()
-
-            # Read user input
             line = input()
         except EOFError:
-            print()  # Handle Ctrl+D
+            print()      # Handle Ctrl+D
             break
         except KeyboardInterrupt:
-            print()  # Handle Ctrl+C
+            print()      # Handle Ctrl+C
             continue
 
-        # Clean up input
+        # --- Parse Input ---
         line = line.strip()
-
-        # Skip empty input
         if not line:
             continue
 
-        # Split input into command + args
         tokens = line.split()
         command = tokens[0]
-        args = tokens[1:]  # all words after command
+        args = tokens[1:]
 
-        # --- Handle 'exit' builtin ---
+        # --- exit builtin ---
         if command == "exit":
             exit_code = 0
-            if len(args) > 0:
+            if args:
                 try:
                     exit_code = int(args[0])
                 except ValueError:
@@ -39,12 +37,24 @@ def main():
                     exit_code = 1
             sys.exit(exit_code)
 
-        # --- Handle 'echo' builtin ---
+        # --- echo builtin ---
         elif command == "echo":
-            # Join arguments with spaces and print
             print(" ".join(args))
 
-        # --- Handle invalid commands ---
+        # --- type builtin ---
+        elif command == "type":
+            # Must have an argument: type <something>
+            if not args:
+                print("type: missing argument")
+                continue
+
+            target = args[0]
+            if target in BUILTINS:
+                print(f"{target} is a shell builtin")
+            else:
+                print(f"{target}: not found")
+
+        # --- Unknown command ---
         else:
             print(f"{command}: command not found")
 
