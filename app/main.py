@@ -3,51 +3,50 @@ import sys
 def main():
     while True:
         try:
-            # Show shell prompt
+            # Show prompt
             sys.stdout.write("$ ")
             sys.stdout.flush()
 
             # Read user input
             line = input()
         except EOFError:
-            # Handle Ctrl+D gracefully
-            print()
+            print()  # Handle Ctrl+D
             break
         except KeyboardInterrupt:
-            # Handle Ctrl+C — show new line and prompt again
-            print()
+            print()  # Handle Ctrl+C
             continue
 
-        # Remove leading/trailing spaces
+        # Clean up input
         line = line.strip()
 
-        # Empty input → show prompt again
+        # Skip empty input
         if not line:
             continue
 
-        # Split into tokens (command + arguments)
+        # Split input into command + args
         tokens = line.split()
         command = tokens[0]
+        args = tokens[1:]  # all words after command
 
         # --- Handle 'exit' builtin ---
         if command == "exit":
-            # Default exit code = 0
             exit_code = 0
-
-            # If user provided an argument (like 'exit 1')
-            if len(tokens) > 1:
+            if len(args) > 0:
                 try:
-                    exit_code = int(tokens[1])
+                    exit_code = int(args[0])
                 except ValueError:
-                    # Invalid argument (non-numeric)
-                    print(f"exit: {tokens[1]}: numeric argument required")
-                    exit_code = 1  # Standard shell behavior
-
-            # Terminate shell immediately
+                    print(f"exit: {args[0]}: numeric argument required")
+                    exit_code = 1
             sys.exit(exit_code)
 
-        # --- Handle all other invalid commands ---
-        print(f"{command}: command not found")
+        # --- Handle 'echo' builtin ---
+        elif command == "echo":
+            # Join arguments with spaces and print
+            print(" ".join(args))
+
+        # --- Handle invalid commands ---
+        else:
+            print(f"{command}: command not found")
 
 if __name__ == "__main__":
     main()
