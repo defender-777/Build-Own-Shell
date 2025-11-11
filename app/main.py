@@ -1,23 +1,23 @@
 import sys
+import os
 
-# Keep a set of builtins for easy lookup
+# Builtin commands recognized by our shell
 BUILTINS = {"exit", "echo", "type"}
 
 def main():
     while True:
         try:
-            # --- Prompt & Input ---
+            # Display prompt
             sys.stdout.write("$ ")
             sys.stdout.flush()
             line = input()
         except EOFError:
-            print()      # Handle Ctrl+D
+            print()
             break
         except KeyboardInterrupt:
-            print()      # Handle Ctrl+C
+            print()
             continue
 
-        # --- Parse Input ---
         line = line.strip()
         if not line:
             continue
@@ -26,7 +26,7 @@ def main():
         command = tokens[0]
         args = tokens[1:]
 
-        # --- exit builtin ---
+        # --- Handle 'exit' ---
         if command == "exit":
             exit_code = 0
             if args:
@@ -37,24 +37,37 @@ def main():
                     exit_code = 1
             sys.exit(exit_code)
 
-        # --- echo builtin ---
+        # --- Handle 'echo' ---
         elif command == "echo":
             print(" ".join(args))
 
-        # --- type builtin ---
+        # --- Handle 'type' ---
         elif command == "type":
-            # Must have an argument: type <something>
             if not args:
                 print("type: missing argument")
                 continue
 
             target = args[0]
+
+            # Case 1: Builtin command
             if target in BUILTINS:
                 print(f"{target} is a shell builtin")
-            else:
+                continue
+
+            # Case 2: Search for executable in PATH
+            found = False
+            for directory in os.environ["PATH"].split(":"):
+                full_path = os.path.join(directory, target)
+                if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
+                    print(f"{target} is {full_path}")
+                    found = True
+                    break
+
+            # Case 3: Not found
+            if not found:
                 print(f"{target}: not found")
 
-        # --- Unknown command ---
+        # --- Handle unknown commands ---
         else:
             print(f"{command}: command not found")
 
