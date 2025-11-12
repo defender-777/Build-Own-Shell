@@ -63,9 +63,13 @@ def main():
                 continue
 
             target = args[0]
+
+            #Case 1: Builtin command
             if target in BUILTINS:
                 print(f"{target} is a shell builtin")
                 continue
+
+            #Case 2 : Search PATH for exceutables 
 
             executable_path = find_executable(target)
             if executable_path:
