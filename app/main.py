@@ -1,8 +1,17 @@
 import sys
 import os
+import subprocess
 
-# Builtin commands recognized by our shell
+# Builtin commands
 BUILTINS = {"exit", "echo", "type"}
+
+def find_executable(command):
+    """Search PATH for an executable file and return its full path if found."""
+    for directory in os.environ["PATH"].split(":"):
+        full_path = os.path.join(directory, command)
+        if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
+            return full_path
+    return None
 
 def main():
     while True:
@@ -26,7 +35,7 @@ def main():
         command = tokens[0]
         args = tokens[1:]
 
-        # --- Handle 'exit' ---
+        # --- Handle 'exit' builtin ---
         if command == "exit":
             exit_code = 0
             if args:
@@ -37,39 +46,38 @@ def main():
                     exit_code = 1
             sys.exit(exit_code)
 
-        # --- Handle 'echo' ---
+        # --- Handle 'echo' builtin ---
         elif command == "echo":
             print(" ".join(args))
 
-        # --- Handle 'type' ---
+        # --- Handle 'type' builtin ---
         elif command == "type":
             if not args:
                 print("type: missing argument")
                 continue
 
             target = args[0]
-
-            # Case 1: Builtin command
             if target in BUILTINS:
                 print(f"{target} is a shell builtin")
                 continue
 
-            # Case 2: Search for executable in PATH
-            found = False
-            for directory in os.environ["PATH"].split(":"):
-                full_path = os.path.join(directory, target)
-                if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
-                    print(f"{target} is {full_path}")
-                    found = True
-                    break
-
-            # Case 3: Not found
-            if not found:
+            executable_path = find_executable(target)
+            if executable_path:
+                print(f"{target} is {executable_path}")
+            else:
                 print(f"{target}: not found")
 
-        # --- Handle unknown commands ---
+        # --- Handle external commands ---
         else:
-            print(f"{command}: command not found")
+            executable_path = find_executable(command)
+            if executable_path:
+                try:
+                    # Run external program with its arguments
+                    subprocess.run([executable_path] + args)
+                except Exception as e:
+                    print(f"Error executing {command}: {e}")
+            else:
+                print(f"{command}: command not found")
 
 if __name__ == "__main__":
     main()
