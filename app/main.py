@@ -3,7 +3,7 @@ import os
 import subprocess
 
 # Builtin commands
-BUILTINS = {"exit", "echo", "type"}
+BUILTINS = {"exit", "echo", "type","pwd"}
 
 def find_executable(command):
     """Search PATH for an executable file and return its full path if found."""
