@@ -50,6 +50,12 @@ def main():
         elif command == "echo":
             print(" ".join(args))
 
+        # --- Handle 'pwd' builtin ---
+        elif command == "pwd":
+            # Get and print the current working directory
+            current_dir = os.getcwd()
+            print(current_dir)
+
         # --- Handle 'type' builtin ---
         elif command == "type":
             if not args:
