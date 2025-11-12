@@ -68,9 +68,17 @@ def main():
                 print(f"{target}: not found")
 
         # --- Handle external commands ---
-        
+        else:
+            executable_path = find_executable(command)
+            if executable_path:
+                try:
+                    #Run external program, but keep argv[0] as the command name 
+                    subprocess.run([command]+ args, executable=executable_path)
+                except Exception as e:
+                    print(f"Error executing {command}:{e}")
+            else:
+                print(f"{command}: command not found")
 
-
-
+    
 if __name__ == "__main__":
     main()
