@@ -54,25 +54,25 @@ def main():
         elif command == "pwd":
             print(os.getcwd())
 
-        # --- cd builtin (absolute + relative paths) ---
+        # --- cd builtin (absolute, relative, and home paths) ---
         elif command == "cd":
             if not args:
-                print("cd: missing argument")
-                continue
+                # No argument means go to home directory
+                path = os.path.expanduser("~")
+            else:
+                path = args[0]
 
-            target_path = args[0]
+            # Expand ~ to home directory if present
+            path = os.path.expanduser(path)
 
-            # Convert to absolute path if relative
-            if not os.path.isabs(target_path):
-                target_path = os.path.abspath(os.path.join(os.getcwd(), target_path))
+            # Resolve relative paths properly
+            if not path.startswith("/"):
+                path = os.path.abspath(os.path.join(os.getcwd(), path))
 
-            # Try to change directory
             try:
-                os.chdir(target_path)
+                os.chdir(path)
             except FileNotFoundError:
-                print(f"cd: {args[0]}: No such file or directory")
-            except NotADirectoryError:
-                print(f"cd: {args[0]}: Not a directory")
+                print(f"cd: {args[0]}: No such file or directory" if args else f"cd: {path}: No such file or directory")
 
         # --- type builtin ---
         elif command == "type":
