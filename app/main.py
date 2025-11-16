@@ -3,7 +3,7 @@ import os
 import subprocess
 
 # Builtin commands
-BUILTINS = {"exit", "echo", "type","pwd"}
+BUILTINS = {"exit", "echo", "type", "pwd", "cd"}
 
 def find_executable(command):
     """Search PATH for an executable file and return its full path if found."""
@@ -35,7 +35,7 @@ def main():
         command = tokens[0]
         args = tokens[1:]
 
-        # --- Handle 'exit' builtin ---
+        # --- exit builtin ---
         if command == "exit":
             exit_code = 0
             if args:
@@ -46,48 +46,44 @@ def main():
                     exit_code = 1
             sys.exit(exit_code)
 
-        # --- Handle 'echo' builtin ---
+        # --- echo builtin ---
         elif command == "echo":
             print(" ".join(args))
 
-        # --- Handle 'pwd' builtin ---
+        # --- pwd builtin ---
         elif command == "pwd":
-            # Get and print the current working directory
             print(os.getcwd())
-        
-         # --- cd builtin (absolute paths only) ---
+
+        # --- cd builtin (absolute + relative paths) ---
         elif command == "cd":
             if not args:
-                # No path provided
                 print("cd: missing argument")
                 continue
 
-            path = args[0]
+            target_path = args[0]
 
-            # Handle only absolute paths in this stage
-            if path.startswith("/"):
-                try:
-                    os.chdir(path)
-                except FileNotFoundError:
-                    print(f"cd: {path}: No such file or directory")
-            else:
-                print("cd: only absolute paths are supported in this stage")
-            
+            # Convert to absolute path if relative
+            if not os.path.isabs(target_path):
+                target_path = os.path.abspath(os.path.join(os.getcwd(), target_path))
 
-        # --- Handle 'type' builtin ---
+            # Try to change directory
+            try:
+                os.chdir(target_path)
+            except FileNotFoundError:
+                print(f"cd: {args[0]}: No such file or directory")
+            except NotADirectoryError:
+                print(f"cd: {args[0]}: Not a directory")
+
+        # --- type builtin ---
         elif command == "type":
             if not args:
                 print("type: missing argument")
                 continue
 
             target = args[0]
-
-            #Case 1: Builtin command
             if target in BUILTINS:
                 print(f"{target} is a shell builtin")
                 continue
-
-            #Case 2 : Search PATH for exceutables 
 
             executable_path = find_executable(target)
             if executable_path:
@@ -95,18 +91,16 @@ def main():
             else:
                 print(f"{target}: not found")
 
-        # --- Handle external commands ---
+        # --- External programs ---
         else:
             executable_path = find_executable(command)
             if executable_path:
                 try:
-                    #Run external program, but keep argv[0] as the command name 
-                    subprocess.run([command]+ args, executable=executable_path)
+                    subprocess.run([command] + args, executable=executable_path)
                 except Exception as e:
-                    print(f"Error executing {command}:{e}")
+                    print(f"Error executing {command}: {e}")
             else:
                 print(f"{command}: command not found")
 
-    
 if __name__ == "__main__":
     main()
