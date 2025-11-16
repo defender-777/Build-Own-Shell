@@ -53,8 +53,26 @@ def main():
         # --- Handle 'pwd' builtin ---
         elif command == "pwd":
             # Get and print the current working directory
-            current_dir = os.getcwd()
-            print(current_dir)
+            print(os.getcwd())
+        
+         # --- cd builtin (absolute paths only) ---
+        elif command == "cd":
+            if not args:
+                # No path provided
+                print("cd: missing argument")
+                continue
+
+            path = args[0]
+
+            # Handle only absolute paths in this stage
+            if path.startswith("/"):
+                try:
+                    os.chdir(path)
+                except FileNotFoundError:
+                    print(f"cd: {path}: No such file or directory")
+            else:
+                print("cd: only absolute paths are supported in this stage")
+            
 
         # --- Handle 'type' builtin ---
         elif command == "type":
