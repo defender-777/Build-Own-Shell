@@ -1,23 +1,35 @@
 import sys
 import os
 import subprocess
-import shlex # Handles quotes strings properly
+import shlex
 
-# Builtin commands
 BUILTINS = {"exit", "echo", "type", "pwd", "cd"}
 
 def find_executable(command):
-    """Search PATH for an executable file and return its full path if found."""
+    """Search PATH and current directory for an executable."""
+    # Case 1: Direct path
+    if "/" in command:
+        if os.path.isfile(command) and os.access(command, os.X_OK):
+            return command
+        return None
+
+    # Case 2: Current directory
+    cwd_path = os.path.join(os.getcwd(), command)
+    if os.path.isfile(cwd_path) and os.access(cwd_path, os.X_OK):
+        return cwd_path
+
+    # Case 3: PATH search
     for directory in os.environ["PATH"].split(":"):
         full_path = os.path.join(directory, command)
         if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
             return full_path
+
     return None
+
 
 def main():
     while True:
         try:
-            # Display prompt
             sys.stdout.write("$ ")
             sys.stdout.flush()
             line = input()
@@ -32,20 +44,58 @@ def main():
         if not line:
             continue
 
-        # Use shelex to handle quotes properly
         try:
             tokens = shlex.split(line)
         except ValueError as e:
-            #Handles unmatched quotes
-            print(f"Syntax error:{e}")
+            print(f"Syntax error: {e}")
             continue
 
         if not tokens:
-            continue 
+            continue
 
-        command  = tokens[0]
+        # --- Handle Redirection ---
+        if ">" in tokens or "1>" in tokens:
+            if ">" in tokens:
+                redir_index = tokens.index(">")
+            else:
+                redir_index = tokens.index("1>")
+
+            # Split command and output file
+            cmd_tokens = tokens[:redir_index]
+            if redir_index + 1 >= len(tokens):
+                print("syntax error: expected filename after >")
+                continue
+            outfile = tokens[redir_index + 1]
+
+            # If nothing to execute
+            if not cmd_tokens:
+                print("syntax error: missing command before >")
+                continue
+
+            executable_path = find_executable(cmd_tokens[0])
+            if not executable_path:
+                print(f"{cmd_tokens[0]}: command not found")
+                continue
+
+            # Execute and redirect stdout
+            try:
+                with open(outfile, "w") as f:
+                    subprocess.run(
+                        [cmd_tokens[0]] + cmd_tokens[1:],
+                        executable=executable_path,
+                        stdout=f,
+                        stderr=sys.stderr
+                    )
+            except Exception as e:
+                print(f"Error executing {cmd_tokens[0]}: {e}")
+
+            continue  # back to prompt
+
+        # --- Normal command handling ---
+        command = tokens[0]
         args = tokens[1:]
-        # --- exit builtin ---
+
+        # Builtin: exit
         if command == "exit":
             exit_code = 0
             if args:
@@ -56,52 +106,43 @@ def main():
                     exit_code = 1
             sys.exit(exit_code)
 
-        # --- echo builtin ---
+        # Builtin: echo
         elif command == "echo":
             print(" ".join(args))
 
-        # --- pwd builtin ---
+        # Builtin: pwd
         elif command == "pwd":
             print(os.getcwd())
 
-        # --- cd builtin (absolute, relative, and home paths) ---
+        # Builtin: cd
         elif command == "cd":
             if not args:
-                # No argument means go to home directory
                 path = os.path.expanduser("~")
             else:
-                path = args[0]
-
-            # Expand ~ to home directory if present
-            path = os.path.expanduser(path)
-
-            # Resolve relative paths properly
+                path = os.path.expanduser(args[0])
             if not path.startswith("/"):
                 path = os.path.abspath(os.path.join(os.getcwd(), path))
-
             try:
                 os.chdir(path)
             except FileNotFoundError:
                 print(f"cd: {args[0]}: No such file or directory" if args else f"cd: {path}: No such file or directory")
 
-        # --- type builtin ---
+        # Builtin: type
         elif command == "type":
             if not args:
                 print("type: missing argument")
                 continue
-
             target = args[0]
             if target in BUILTINS:
                 print(f"{target} is a shell builtin")
                 continue
-
             executable_path = find_executable(target)
             if executable_path:
                 print(f"{target} is {executable_path}")
             else:
                 print(f"{target}: not found")
 
-        # --- External programs ---
+        # External Commands
         else:
             executable_path = find_executable(command)
             if executable_path:
@@ -111,6 +152,7 @@ def main():
                     print(f"Error executing {command}: {e}")
             else:
                 print(f"{command}: command not found")
+
 
 if __name__ == "__main__":
     main()
