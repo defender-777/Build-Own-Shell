@@ -1,6 +1,7 @@
 import sys
 import os
 import subprocess
+import shlex # Handles quotes strings properly
 
 # Builtin commands
 BUILTINS = {"exit", "echo", "type", "pwd", "cd"}
@@ -31,10 +32,19 @@ def main():
         if not line:
             continue
 
-        tokens = line.split()
-        command = tokens[0]
-        args = tokens[1:]
+        # Use shelex to handle quotes properly
+        try:
+            tokens = shlex.split(line)
+        except ValueError as e:
+            #Handles unmatched quotes
+            print(f"Syntax error:{e}")
+            continue
 
+        if not tokens:
+            continue 
+
+        command  = tokens[0]
+        args = tokens[1:]
         # --- exit builtin ---
         if command == "exit":
             exit_code = 0
