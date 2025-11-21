@@ -1,31 +1,29 @@
-import sys
 import os
-import subprocess
+import sys
 import shlex
+import subprocess
 
-# Builtin commands
+# -------------------------
+# Builtins
+# -------------------------
+
 BUILTINS = {"exit", "echo", "type", "pwd", "cd"}
 
 
 def find_executable(command: str):
-    """
-    Search for an executable:
-    - If command contains '/', treat it as a path.
-    - Else search current directory.
-    - Then search PATH.
-    """
-    # Case 1: explicit path
+    """Search current directory and PATH for an executable."""
+    # Case 1: Direct path (contains '/')
     if "/" in command:
         if os.path.isfile(command) and os.access(command, os.X_OK):
             return command
         return None
 
-    # Case 2: current working directory
+    # Case 2: Current directory
     cwd_path = os.path.join(os.getcwd(), command)
     if os.path.isfile(cwd_path) and os.access(cwd_path, os.X_OK):
         return cwd_path
 
-    # Case 3: PATH search
+    # Case 3: PATH
     path_env = os.environ.get("PATH", "")
     for directory in path_env.split(":"):
         if not directory:
@@ -37,164 +35,340 @@ def find_executable(command: str):
     return None
 
 
-def parse_redirections(tokens):
-    """
-    Parse redirection operators from token list.
-
-    Supported:
-      >, 1>      : stdout overwrite
-      >>, 1>>    : stdout append
-      2>         : stderr overwrite
-      2>>        : stderr append
-
-    Returns:
-      cmd_tokens, stdout_redir, stdout_append, stderr_redir, stderr_append, error_msg
-    """
-    stdout_redir = None
-    stdout_append = False
-    stderr_redir = None
-    stderr_append = False
-
-    cmd_tokens = []
-    i = 0
-    n = len(tokens)
-
-    while i < n:
-        t = tokens[i]
-
-        # stdout overwrite
-        if t in (">", "1>"):
-            if i + 1 >= n:
-                return None, None, False, None, False, "syntax error: expected filename after >"
-            stdout_redir = tokens[i + 1]
-            stdout_append = False
-            i += 2
-            continue
-
-        # stdout append
-        if t in (">>", "1>>"):
-            if i + 1 >= n:
-                return None, None, False, None, False, "syntax error: expected filename after >>"
-            stdout_redir = tokens[i + 1]
-            stdout_append = True
-            i += 2
-            continue
-
-        # stderr overwrite
-        if t == "2>":
-            if i + 1 >= n:
-                return None, None, False, None, False, "syntax error: expected filename after 2>"
-            stderr_redir = tokens[i + 1]
-            stderr_append = False
-            i += 2
-            continue
-
-        # stderr append
-        if t == "2>>":
-            if i + 1 >= n:
-                return None, None, False, None, False, "syntax error: expected filename after 2>>"
-            stderr_redir = tokens[i + 1]
-            stderr_append = True
-            i += 2
-            continue
-
-        # normal command/arg token
-        cmd_tokens.append(t)
-        i += 1
-
-    if not cmd_tokens:
-        return None, stdout_redir, stdout_append, stderr_redir, stderr_append, "syntax error: missing command"
-
-    return cmd_tokens, stdout_redir, stdout_append, stderr_redir, stderr_append, None
+def builtin_exit(args, stdin, stdout, stderr):
+    code = 0
+    if args:
+        try:
+            code = int(args[0])
+        except ValueError:
+            stderr.write(f"exit: {args[0]}: numeric argument required\n")
+            stderr.flush()
+            code = 1
+    sys.exit(code)
 
 
-def run_external(cmd_tokens, stdout_redir, stdout_append, stderr_redir, stderr_append):
-    """
-    Run an external command with optional stdout/stderr redirections.
-    """
-    executable_path = find_executable(cmd_tokens[0])
-    if not executable_path:
-        print(f"{cmd_tokens[0]}: command not found")
-        return
+def builtin_echo(args, stdin, stdout, stderr):
+    stdout.write(" ".join(args) + "\n")
+    stdout.flush()
 
-    # Build argv ensuring argv[0] is the command, not the full path
-    argv = [cmd_tokens[0]] + cmd_tokens[1:]
 
-    stdout_target = sys.stdout
-    stderr_target = sys.stderr
-    stdout_file = None
-    stderr_file = None
+def builtin_pwd(args, stdin, stdout, stderr):
+    stdout.write(os.getcwd() + "\n")
+    stdout.flush()
+
+
+def builtin_cd(args, stdin, stdout, stderr):
+    if not args:
+        path_arg = os.path.expanduser("~")
+        display_path = path_arg
+    else:
+        display_path = args[0]
+        path_arg = os.path.expanduser(args[0])
+
+    if not os.path.isabs(path_arg):
+        path_arg = os.path.abspath(os.path.join(os.getcwd(), path_arg))
 
     try:
-        if stdout_redir is not None:
-            mode = "a" if stdout_append else "w"
-            stdout_file = open(stdout_redir, mode)
-            stdout_target = stdout_file
+        os.chdir(path_arg)
+    except FileNotFoundError:
+        stderr.write(f"cd: {display_path}: No such file or directory\n")
+        stderr.flush()
 
-        if stderr_redir is not None:
-            mode = "a" if stderr_append else "w"
-            stderr_file = open(stderr_redir, mode)
-            stderr_target = stderr_file
 
-        subprocess.run(
-            argv,
-            executable=executable_path,
-            stdout=stdout_target,
-            stderr=stderr_target,
-        )
-    except Exception as e:
-        print(f"Error executing {cmd_tokens[0]}: {e}")
+def builtin_type(args, stdin, stdout, stderr):
+    if not args:
+        stderr.write("type: missing argument\n")
+        stderr.flush()
+        return
+
+    target = args[0]
+    if target in BUILTINS:
+        stdout.write(f"{target} is a shell builtin\n")
+        stdout.flush()
+        return
+
+    exe = find_executable(target)
+    if exe:
+        stdout.write(f"{target} is {exe}\n")
+    else:
+        stdout.write(f"{target}: not found\n")
+    stdout.flush()
+
+
+def run_builtin(command, args, stdin, stdout, stderr):
+    if command == "exit":
+        builtin_exit(args, stdin, stdout, stderr)
+    elif command == "echo":
+        builtin_echo(args, stdin, stdout, stderr)
+    elif command == "pwd":
+        builtin_pwd(args, stdin, stdout, stderr)
+    elif command == "cd":
+        builtin_cd(args, stdin, stdout, stderr)
+    elif command == "type":
+        builtin_type(args, stdin, stdout, stderr)
+    else:
+        # Should not happen if we check BUILTINS before calling
+        stdout.write(f"{command}: command not found\n")
+        stdout.flush()
+
+
+# -------------------------
+# Redirection parsing
+# -------------------------
+
+class CommandSpec:
+    def __init__(self, argv, stdout_redir=None, stderr_redir=None):
+        self.argv = argv              # list[str]
+        self.stdout_redir = stdout_redir  # (mode, path) or None; mode in {"overwrite", "append"}
+        self.stderr_redir = stderr_redir  # same as above
+
+
+def parse_redirections(tokens):
+    """
+    Parse a single command's tokens into argv + redirection info.
+    Supports: >, 1>, >>, 1>>, 2>, 2>>.
+    """
+    argv = []
+    stdout_redir = None
+    stderr_redir = None
+    i = 0
+    error = False
+
+    while i < len(tokens):
+        t = tokens[i]
+        if t in (">", "1>"):
+            if i + 1 >= len(tokens):
+                print("syntax error: expected filename after >", file=sys.stderr)
+                error = True
+                break
+            stdout_redir = ("overwrite", tokens[i + 1])
+            i += 2
+        elif t in (">>", "1>>"):
+            if i + 1 >= len(tokens):
+                print("syntax error: expected filename after >>", file=sys.stderr)
+                error = True
+                break
+            stdout_redir = ("append", tokens[i + 1])
+            i += 2
+        elif t == "2>":
+            if i + 1 >= len(tokens):
+                print("syntax error: expected filename after 2>", file=sys.stderr)
+                error = True
+                break
+            stderr_redir = ("overwrite", tokens[i + 1])
+            i += 2
+        elif t == "2>>":
+            if i + 1 >= len(tokens):
+                print("syntax error: expected filename after 2>>", file=sys.stderr)
+                error = True
+                break
+            stderr_redir = ("append", tokens[i + 1])
+            i += 2
+        else:
+            argv.append(t)
+            i += 1
+
+    return CommandSpec(argv, stdout_redir, stderr_redir), error
+
+
+# -------------------------
+# Command execution
+# -------------------------
+
+def open_redir_stream(redir_spec, default_stream):
+    """
+    redir_spec: (mode, path) or None
+    Returns (stream, opened_file_or_None)
+    """
+    if redir_spec is None:
+        return default_stream, None
+
+    mode, path = redir_spec
+    file_mode = "w" if mode == "overwrite" else "a"
+    f = open(path, file_mode)
+    return f, f
+
+
+def run_single_command(spec: CommandSpec):
+    if not spec.argv:
+        return
+
+    command = spec.argv[0]
+    args = spec.argv[1:]
+
+    # Setup redirections
+    out_stream, out_file = open_redir_stream(spec.stdout_redir, sys.stdout)
+    err_stream, err_file = open_redir_stream(spec.stderr_redir, sys.stderr)
+
+    try:
+        if command in BUILTINS:
+            run_builtin(command, args, sys.stdin, out_stream, err_stream)
+        else:
+            exe = find_executable(command)
+            if not exe:
+                # "command not found" usually goes to stdout in our previous stages
+                out_stream.write(f"{command}: command not found\n")
+                out_stream.flush()
+                return
+
+            subprocess.run(
+                [command] + args,
+                executable=exe,
+                stdin=sys.stdin,
+                stdout=out_stream,
+                stderr=err_stream,
+            )
     finally:
-        if stdout_file is not None:
-            stdout_file.close()
-        if stderr_file is not None:
-            stderr_file.close()
+        if out_file is not None:
+            out_file.close()
+        if err_file is not None and err_file is not out_file:
+            err_file.close()
 
 
-def run_pipeline(left_tokens, right_tokens):
+def run_pipeline(spec1: CommandSpec, spec2: CommandSpec):
     """
-    Run a simple pipeline: left | right
-    Only external commands are expected here (per Codecrafters stage spec).
+    Execute spec1 | spec2
+    Supports builtins + externals, and redirection on:
+      - spec1: stderr only
+      - spec2: stdout + stderr.
     """
-    if not left_tokens or not right_tokens:
-        print("syntax error: invalid pipeline")
+    if not spec1.argv or not spec2.argv:
         return
 
-    left_exec = find_executable(left_tokens[0])
-    right_exec = find_executable(right_tokens[0])
+    cmd1, args1 = spec1.argv[0], spec1.argv[1:]
+    cmd2, args2 = spec2.argv[0], spec2.argv[1:]
 
-    if not left_exec:
-        print(f"{left_tokens[0]}: command not found")
-        return
-    if not right_exec:
-        print(f"{right_tokens[0]}: command not found")
-        return
+    is_builtin1 = cmd1 in BUILTINS
+    is_builtin2 = cmd2 in BUILTINS
 
-    left_argv = [left_tokens[0]] + left_tokens[1:]
-    right_argv = [right_tokens[0]] + right_tokens[1:]
+    # Redirections: stdout of first is always piped, so ignore spec1.stdout_redir.
+    # stderr of both and stdout of second are respected.
+    out2_stream, out2_file = open_redir_stream(spec2.stdout_redir, sys.stdout)
+    err1_stream, err1_file = open_redir_stream(spec1.stderr_redir, sys.stderr)
+    err2_stream, err2_file = open_redir_stream(spec2.stderr_redir, sys.stderr)
 
-    # left stdout -> pipe -> right stdin
-    p1 = subprocess.Popen(
-        left_argv,
-        executable=left_exec,
-        stdout=subprocess.PIPE,
-        stderr=sys.stderr,
-    )
+    try:
+        if not is_builtin1 and not is_builtin2:
+            # external | external
+            exe1 = find_executable(cmd1)
+            exe2 = find_executable(cmd2)
+            if not exe1:
+                err1_stream.write(f"{cmd1}: command not found\n")
+                err1_stream.flush()
+                return
+            if not exe2:
+                err2_stream.write(f"{cmd2}: command not found\n")
+                err2_stream.flush()
+                return
 
-    p2 = subprocess.Popen(
-        right_argv,
-        executable=right_exec,
-        stdin=p1.stdout,
-        stdout=sys.stdout,
-        stderr=sys.stderr,
-    )
+            p1 = subprocess.Popen(
+                [cmd1] + args1,
+                executable=exe1,
+                stdin=sys.stdin,
+                stdout=subprocess.PIPE,
+                stderr=err1_stream,
+                text=True,
+            )
+            p2 = subprocess.Popen(
+                [cmd2] + args2,
+                executable=exe2,
+                stdin=p1.stdout,
+                stdout=out2_stream,
+                stderr=err2_stream,
+                text=True,
+            )
+            if p1.stdout is not None:
+                p1.stdout.close()
+            p2.communicate()
+            # For commands like `tail -f`, ensure p1 doesn't linger
+            try:
+                p1.terminate()
+            except Exception:
+                pass
 
-    # Allow p1 to receive SIGPIPE when p2 exits
-    p1.stdout.close()
-    # Wait for right side to complete (e.g., head -n 5)
-    p2.communicate()
-    # Optionally wait for left
-    p1.wait()
+        elif is_builtin1 and not is_builtin2:
+            # builtin | external
+            exe2 = find_executable(cmd2)
+            if not exe2:
+                err2_stream.write(f"{cmd2}: command not found\n")
+                err2_stream.flush()
+                return
+
+            p2 = subprocess.Popen(
+                [cmd2] + args2,
+                executable=exe2,
+                stdin=subprocess.PIPE,
+                stdout=out2_stream,
+                stderr=err2_stream,
+                text=True,
+            )
+
+            # Run builtin, writing into p2.stdin
+            run_builtin(cmd1, args1, sys.stdin, p2.stdin, err1_stream)
+            if p2.stdin is not None:
+                p2.stdin.close()
+            p2.communicate()
+
+        elif not is_builtin1 and is_builtin2:
+            # external | builtin
+            exe1 = find_executable(cmd1)
+            if not exe1:
+                err1_stream.write(f"{cmd1}: command not found\n")
+                err1_stream.flush()
+                return
+
+            p1 = subprocess.Popen(
+                [cmd1] + args1,
+                executable=exe1,
+                stdin=sys.stdin,
+                stdout=subprocess.PIPE,
+                stderr=err1_stream,
+                text=True,
+            )
+
+            # Our builtins (echo, type, etc.) don't currently read stdin,
+            # but we pass it in case future stages do.
+            stdin_for_builtin = p1.stdout if p1.stdout is not None else sys.stdin
+            run_builtin(cmd2, args2, stdin_for_builtin, out2_stream, err2_stream)
+
+            if p1.stdout is not None:
+                p1.stdout.close()
+            try:
+                p1.terminate()
+            except Exception:
+                pass
+
+        else:
+            # builtin | builtin (not needed for tests, but handle gracefully)
+            # Pipe is not really used since our builtins ignore stdin.
+            run_builtin(cmd1, args1, sys.stdin, sys.stdout, sys.stderr)
+            run_builtin(cmd2, args2, sys.stdin, out2_stream, err2_stream)
+
+    finally:
+        if out2_file is not None:
+            out2_file.close()
+        if err1_file is not None and err1_file is not out2_file:
+            err1_file.close()
+        if err2_file is not None and err2_file not in (out2_file, err1_file):
+            err2_file.close()
+
+
+# -------------------------
+# REPL
+# -------------------------
+
+def split_pipeline(tokens):
+    """Split tokens on '|' into up to two segments (we only support a single pipe)."""
+    segments = []
+    current = []
+    for t in tokens:
+        if t == "|":
+            segments.append(current)
+            current = []
+        else:
+            current.append(t)
+    segments.append(current)
+    return segments
 
 
 def main():
@@ -214,123 +388,34 @@ def main():
         if not line:
             continue
 
-        # Tokenize with shlex to handle quotes properly
         try:
             tokens = shlex.split(line)
         except ValueError as e:
-            print(f"Syntax error: {e}")
+            print(f"Syntax error: {e}", file=sys.stderr)
             continue
 
         if not tokens:
             continue
 
-        # --- Pipelines: command1 | command2 (two external commands) ---
+        # Check for pipeline
         if "|" in tokens:
-            pipe_index = tokens.index("|")
-            left_tokens = tokens[:pipe_index]
-            right_tokens = tokens[pipe_index + 1:]
-            run_pipeline(left_tokens, right_tokens)
-            continue
-
-        # --- Redirections (>, >>, 2>, 2>>) ---
-        (
-            cmd_tokens,
-            stdout_redir,
-            stdout_append,
-            stderr_redir,
-            stderr_append,
-            err,
-        ) = parse_redirections(tokens)
-
-        if err is not None:
-            print(err)
-            continue
-
-        command = cmd_tokens[0]
-        args = cmd_tokens[1:]
-
-        # If *any* redirection is present, we always run via external executable,
-        # not via builtins (this matches Codecrafters test expectations).
-        if stdout_redir is not None or stderr_redir is not None:
-            run_external(cmd_tokens, stdout_redir, stdout_append, stderr_redir, stderr_append)
-            continue
-
-        # ========================
-        #       BUILTINS
-        # ========================
-
-        # exit builtin
-        if command == "exit":
-            exit_code = 0
-            if args:
-                try:
-                    exit_code = int(args[0])
-                except ValueError:
-                    print(f"exit: {args[0]}: numeric argument required")
-                    exit_code = 1
-            sys.exit(exit_code)
-
-        # echo builtin
-        elif command == "echo":
-            print(" ".join(args))
-
-        # pwd builtin
-        elif command == "pwd":
-            print(os.getcwd())
-
-        # cd builtin (absolute, relative, ~, and no-arg -> home)
-        elif command == "cd":
-            if not args:
-                path = os.path.expanduser("~")
-            else:
-                path = os.path.expanduser(args[0])
-
-            # Resolve relative to current directory
-            if not path.startswith("/"):
-                path = os.path.abspath(os.path.join(os.getcwd(), path))
-
-            try:
-                os.chdir(path)
-            except FileNotFoundError:
-                if args:
-                    print(f"cd: {args[0]}: No such file or directory")
-                else:
-                    print(f"cd: {path}: No such file or directory")
-
-        # type builtin
-        elif command == "type":
-            if not args:
-                print("type: missing argument")
+            segments = split_pipeline(tokens)
+            if len(segments) != 2:
+                # For this challenge only 2-command pipelines are needed
+                print("pipelines with more than one '|' are not supported", file=sys.stderr)
                 continue
 
-            target = args[0]
-            if target in BUILTINS:
-                print(f"{target} is a shell builtin")
+            spec1, err1 = parse_redirections(segments[0])
+            spec2, err2 = parse_redirections(segments[1])
+            if err1 or err2 or not spec1.argv or not spec2.argv:
                 continue
 
-            executable_path = find_executable(target)
-            if executable_path:
-                print(f"{target} is {executable_path}")
-            else:
-                print(f"{target}: not found")
-
-        # ========================
-        #   EXTERNAL COMMANDS
-        # ========================
+            run_pipeline(spec1, spec2)
         else:
-            executable_path = find_executable(command)
-            if executable_path:
-                try:
-                    subprocess.run(
-                        [command] + args,
-                        executable=executable_path,
-                        stdout=sys.stdout,
-                        stderr=sys.stderr,
-                    )
-                except Exception as e:
-                    print(f"Error executing {command}: {e}")
-            else:
-                print(f"{command}: command not found")
+            spec, err = parse_redirections(tokens)
+            if err or not spec.argv:
+                continue
+            run_single_command(spec)
 
 
 if __name__ == "__main__":
