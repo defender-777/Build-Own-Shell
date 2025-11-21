@@ -153,6 +153,40 @@ def main():
 
             continue
 
+
+        # --- Handle stderr append (2>>)---
+        if "2>>" in tokens:
+            redir_index= tokens.index("2>>")
+
+            cmd_tokens = tokens[:redir_index]
+            if redir_index + 1 >= len(tokens):
+                print("Syntax error: Expected filename after 2>>")
+                continue
+
+            errfile = tokens[redir_index + 1]
+
+            if not cmd_tokens:
+                print("Syntax error: missing command before 2>>")
+                continue
+
+            executable_path = find_executable(cmd_tokens[0])
+            if not executable_path:
+                print(f"{cmd_tokens[0]}: command not found")
+                continue
+
+            try:
+                with open(errfile, "a") as f:
+                    subprocess.run(
+                        [cmd_tokens[0]] + cmd_tokens[1:],
+                        executable = executable_path,
+                        stdout = sys.stdout,
+                        stderr = f
+                    )
+            except Exception as e:
+                print(f"Eroor exceutiong {cmd_tokens[0]}:{e}")
+
+            continue
+       
         # --- Normal command handling ---
         command = tokens[0]
         args = tokens[1:]
