@@ -2,77 +2,29 @@ import sys
 import os
 import subprocess
 import shlex
-import termios
-import tty
 
 BUILTINS = {"exit", "echo", "type", "pwd", "cd"}
 
-BUILTIN_AUTOCOMPLETE = ["echo", "exit"]
-
-
-#-----Autocomplete Input Reader------
-
-def read_line_with_autocomplete():
-    """
-    Reads a line from stdin with TAB autocompletion for builtins (echo,exit).
-    """
-    buffer = " "
-
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    tty.setraw(fd)
-
-    try:
-        while True:
-            ch = sys.stdin.read(1)
-
-            #Enter 
-            if ch == "\n" or ch == "\r":
-                print()
-                break
-
-            #BACKSPACE
-            if ch == "\t":
-                match = None
-                for b in BUILTIN_AUTOCOMPLETE:
-                    if b.startswith(buffer):
-                        match = b
-                        break
-                if match:
-                    sys.stdout.write("\r$" + match)
-                    sys.stdout.flush()
-                    buffer = match
-                continue
-            # Normal char 
-            buffer += ch 
-            sys.stdout.write(ch)
-            sys.stdout.flush()
-    finally: 
-        termios.tcsetattr(fd,termios.TCSADRAIN, old_settings)
-    return buffer        
-    
 def find_executable(command):
-        """Search PATH + current directory for executable files. """
-        # Direct path 
-        if "/" in command:
-            if os.path.isfile(command) and os.access(command, os.X_OK):
-                return command
-            return None
-        
-        #Current directory
-        cwd_path = os.path.join(os.getcwd(),command)
-        if os.path.isfile(cwd_path) and os.access(cwd_path, os.X_OK):
-            return cwd_path
-        
-        #PATH directories
-        for directory in os.environ["PATH"].split(":"):
-            full_path = os.path.join(directory, command)
-            if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
-                return full_path
-            
+    """Search PATH and current directory for an executable."""
+    # Case 1: If command includes a path
+    if "/" in command:
+        if os.path.isfile(command) and os.access(command, os.X_OK):
+            return command
         return None
-    
-    
+
+    # Case 2: Current directory
+    cwd_path = os.path.join(os.getcwd(), command)
+    if os.path.isfile(cwd_path) and os.access(cwd_path, os.X_OK):
+        return cwd_path
+
+    # Case 3: PATH directories
+    for directory in os.environ["PATH"].split(":"):
+        full_path = os.path.join(directory, command)
+        if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
+            return full_path
+
+    return None
 
 
 def main():
@@ -201,40 +153,6 @@ def main():
 
             continue
 
-
-        # --- Handle stderr append (2>>)---
-        if "2>>" in tokens:
-            redir_index= tokens.index("2>>")
-
-            cmd_tokens = tokens[:redir_index]
-            if redir_index + 1 >= len(tokens):
-                print("Syntax error: Expected filename after 2>>")
-                continue
-
-            errfile = tokens[redir_index + 1]
-
-            if not cmd_tokens:
-                print("Syntax error: missing command before 2>>")
-                continue
-
-            executable_path = find_executable(cmd_tokens[0])
-            if not executable_path:
-                print(f"{cmd_tokens[0]}: command not found")
-                continue
-
-            try:
-                with open(errfile, "a") as f:
-                    subprocess.run(
-                        [cmd_tokens[0]] + cmd_tokens[1:],
-                        executable = executable_path,
-                        stdout = sys.stdout,
-                        stderr = f
-                    )
-            except Exception as e:
-                print(f"Eroor exceutiong {cmd_tokens[0]}:{e}")
-
-            continue
-       
         # --- Normal command handling ---
         command = tokens[0]
         args = tokens[1:]
