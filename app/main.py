@@ -7,7 +7,7 @@ BUILTINS = {"exit", "echo", "type", "pwd", "cd"}
 
 def find_executable(command):
     """Search PATH and current directory for an executable."""
-    # Case 1: Direct path (e.g. ./file)
+    # Case 1: If command includes a path
     if "/" in command:
         if os.path.isfile(command) and os.access(command, os.X_OK):
             return command
@@ -18,7 +18,7 @@ def find_executable(command):
     if os.path.isfile(cwd_path) and os.access(cwd_path, os.X_OK):
         return cwd_path
 
-    # Case 3: Search PATH directories
+    # Case 3: PATH directories
     for directory in os.environ["PATH"].split(":"):
         full_path = os.path.join(directory, command)
         if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
@@ -53,6 +53,42 @@ def main():
         if not tokens:
             continue
 
+        # --- Handle append redirection (1>> or >>) ---
+        if ">>" in tokens or "1>>" in tokens:
+            if ">>" in tokens:
+                redir_index = tokens.index(">>")
+            else:
+                redir_index = tokens.index("1>>")
+
+            cmd_tokens = tokens[:redir_index]
+            if redir_index + 1 >= len(tokens):
+                print("syntax error: expected filename after >>")
+                continue
+            outfile = tokens[redir_index + 1]
+
+            if not cmd_tokens:
+                print("syntax error: missing command before >>")
+                continue
+
+            executable_path = find_executable(cmd_tokens[0])
+            if not executable_path:
+                print(f"{cmd_tokens[0]}: command not found")
+                continue
+
+            try:
+                # "a" = append mode
+                with open(outfile, "a") as f:
+                    subprocess.run(
+                        [cmd_tokens[0]] + cmd_tokens[1:],
+                        executable=executable_path,
+                        stdout=f,
+                        stderr=sys.stderr
+                    )
+            except Exception as e:
+                print(f"Error executing {cmd_tokens[0]}: {e}")
+
+            continue
+
         # --- Handle stdout redirection (1> or >) ---
         if ">" in tokens or "1>" in tokens:
             if ">" in tokens:
@@ -66,12 +102,17 @@ def main():
                 continue
             outfile = tokens[redir_index + 1]
 
+            if not cmd_tokens:
+                print("syntax error: missing command before >")
+                continue
+
             executable_path = find_executable(cmd_tokens[0])
             if not executable_path:
                 print(f"{cmd_tokens[0]}: command not found")
                 continue
 
             try:
+                # "w" = overwrite mode
                 with open(outfile, "w") as f:
                     subprocess.run(
                         [cmd_tokens[0]] + cmd_tokens[1:],
