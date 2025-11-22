@@ -1,523 +1,212 @@
+import sys
 import os
-import shlex
 import subprocess
 import shutil
-from typing import Tuple, List
-import readline
-import signal
+import shlex
 
-last_completion_text = ""
-completion_count = 0
-command_history = []
-
-
-def get_executable_commands(text: str) -> List[str]:
-    commands = []
-    path_env = os.environ.get("PATH", "")
-    if not path_env:
-        return commands
-    path_dirs = path_env.split(os.pathsep)
-
-    for path_dir in path_dirs:
-        if not os.path.isdir(path_dir):
-            continue
-
-        try:
-            for filename in os.listdir(path_dir):
-                if filename.startswith(text):
-                    full_path = os.path.join(path_dir, filename)
-                    if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
-                        if filename not in commands:
-                            commands.append(filename)
-        except (OSError, PermissionError):
-            continue
-
-    return sorted(commands)
+try:
+    import readline
+except ImportError:
+    import pyreadline3 as readline
 
 
-def get_all_matches(text):
-    builtins = ["exit"]
-    builtin_matches = [cmd for cmd in builtins if cmd.startswith(text)]
-    external_matches = get_executable_commands(text)
-    # print(builtin_matches + external_matches)
-    return builtin_matches + external_matches
+# Variables to track completion state
+last_tab_text = ""
+last_tab_matches = []
+last_tab_count = 0
+
+# Set up tab completion
 
 
-def find_common_prefix(strings: List[str]) -> str:
-    if not strings:
-        return ""
-
-    if len(strings) == 1:
-        return strings[0]
-
-    prefix = strings[0]
-    for string in strings[1:]:
-        common_len = 0
-        min_len = min(len(prefix), len(string))
-
-        for i in range(min_len):
-            if prefix[i] == string[i]:
-                common_len += 1
-            else:
-                break
-
-        prefix = prefix[:common_len]
-
-        if not prefix:
-            break
-
-    return prefix
-
-
-def complete_builtin(text, state):
-    global last_completion_text, completion_count
-    if text != last_completion_text or state == 0:
-        if text != last_completion_text:
-            completion_count = 0
-        last_completion_text = text
-    all_matches = get_all_matches(text)
-    if not all_matches:
-        return None
-    if len(all_matches) == 1:
-        if state == 0:
-            return all_matches[0] + " "
-        return None
-    if len(all_matches) > 1:
-        if state == 0:
-            completion_count += 1
-            common_prefix = find_common_prefix(all_matches)
-            if len(common_prefix) > len(text):
-                return common_prefix
-            if completion_count == 1:
-                print("\a", end="")
-                return None
-            elif completion_count == 2:
-                print()
-                print("  ".join(all_matches))
-                print("$ " + text, end="")
-                return None
-        return None
+def find_executable(command):
+    """Find executable in PATH directories. Returns full path if found, None otherwise."""
+    path_dirs = os.environ.get("PATH", "").split(os.pathsep)
+    for directory in path_dirs:
+        full_path = os.path.join(directory, command)
+        if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
+            return full_path
     return None
 
 
-def setup_readline():
-    readline.set_completer(complete_builtin)
-    readline.parse_and_bind("tab: complete")
-    readline.set_completer_delims(" \t\n`!@#$%^&*()=+[{]}\\|;:'\",<>?")
-    readline.parse_and_bind("set show-all-if-ambiguous off")
-    readline.parse_and_bind("set completion-query-items -1")
-    readline.set_auto_history(False)
-
-
-class BuiltIn:
-    def execute(self, args: str = ""):
-        raise NotImplementedError
-
-    def __str__(self):
-        raise NotImplementedError
-
-
-class BuiltinFactory:
-    builtins = {}
-
-    @staticmethod
-    def create(command: str):
-        return BuiltinFactory.builtins.get(command, lambda: None)()
-
-    @staticmethod
-    def is_builtin(command: str) -> bool:
-        return command in BuiltinFactory.builtins
-
-
-class Exit(BuiltIn):
-    def execute(self, args: str = ""):
-        exit(0)
-
-    def __str__(self):
-        return "exit is a shell builtin"
-
-
-class Echo(BuiltIn):
-    def execute(self, args: str = ""):
-        print(args)
-
-    def __str__(self):
-        return "echo is a shell builtin"
-
-
-class PWD(BuiltIn):
-    def execute(self, args: str = ""):
-        print(os.getcwd())
-
-    def __str__(self):
-        return "pwd is a shell builtin"
-
-
-class CD(BuiltIn):
-    def execute(self, args: str = ""):
-        path = args.strip()
-
-        if path == "~":
-            path = os.environ.get("HOME", "")
-
-        if not path:
-            return
-
-        try:
-            os.chdir(path)
-        except FileNotFoundError:
-            print(f"cd: {args}: No such file or directory", file=os.sys.stderr)
-        except Exception as e:
-            print(f"cd: {args}: {e}", file=os.sys.stderr)
-
-    def __str__(self):
-        return "cd: a shell builtin that changes the current directory"
-
-
-class TypeExplain(BuiltIn):
-    def execute(self, args: str = ""):
-        if not args:
-            print("type: usage: type [name ...]")
-            return
-
-        for token in shlex.split(args):
-            if token in ["exit", "pwd", "cd", "type", "echo", "history"]:
-                print(token, "is a shell builtin")
-            else:
-                path = self.find_in_path(token)
-                if path:
-                    print(f"{token} is {path}")
-                else:
-                    print(f"{token}: not found")
-
-    def find_in_path(self, cmd: str) -> str:
-        for dir in os.environ.get("PATH", "").split(":"):
-            full_path = os.path.join(dir, cmd)
+def find_all_executables():
+    """Find executable in PATH directories. Returns full path if found, None otherwise."""
+    executables = []
+    path_dirs = os.environ.get("PATH", "").split(os.pathsep)
+    for directory in path_dirs:
+        if not directory or not os.path.isdir(directory):
+            continue
+        for file in os.listdir(directory):
+            full_path = os.path.join(directory, file)
             if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
-                return full_path
-        return ""
-
-    def __str__(self):
-        return "type is a shell builtin"
+                executables.append(file)
+    return executables
 
 
-class History(BuiltIn):
-    def execute(self, args: str = ""):
-        global command_history
-        if args.strip():
-            n = int(args.strip())
-            histories = command_history[-n:]
-            start_index = len(command_history) - n + 1
+def longest_common_prefix(matches):
+    result = ""
+    index = 0
+    min_length = min([len(text) for text in matches])
+    # print(matches)
+    while index < min_length:
+        if len(set([text[index] for text in matches])) > 1:
+            return result
+        index += 1
+        result += matches[0][index]
+    return result
+
+
+def completer(text, state):
+    global last_tab_count, last_tab_matches, last_tab_text
+
+    built_in_functions = list(
+        set(["exit", "echo", "type", "pwd", "history"] + find_all_executables())
+    )
+    matches = sorted([cmd for cmd in built_in_functions if cmd.startswith(text)])
+
+    if text != last_tab_text:
+        last_tab_text = text
+        last_tab_count = 0
+
+    # First tab: complete to longest common prefix if possible
+    # prefix = longest_common_prefix(matches)
+    # print(f"Here is the prefix: {prefix}")
+
+    if state == 0 and len(matches) > 1:
+        if last_tab_count == 0:
+            if all(match.startswith(matches[0]) for match in matches[1:]):
+                return matches[0]
+            last_tab_count += 1
+            sys.stdout.write("\a")
+            return None
         else:
-            histories = command_history
-            start_index = 1
-
-        for i, cmd in enumerate(histories, start_index):
-            print(f"    {i}  {cmd}")
-
-    def __str__(self):
-        return "history is a shell builtin"
-
-
-BuiltinFactory.builtins = {
-    "exit": Exit,
-    # "echo": Echo,
-    "pwd": PWD,
-    "cd": CD,
-    "type": TypeExplain,
-    "history": History,
-}
-
-
-def parse_input(input_str: str) -> Tuple[str, str, List[str]]:
-    tokens = shlex.split(input_str, posix=True)
-    command = tokens[0] if tokens else ""
-    args = " ".join(tokens[1:])
-    return command, args, tokens
-
-
-def parse_pipeline(input_str: str) -> List[str]:
-    """Parse a command string into pipeline components."""
-    # Split by pipe, but handle quoted strings properly
-    commands = []
-    current_cmd = ""
-    in_quotes = False
-    quote_char = None
-
-    i = 0
-    while i < len(input_str):
-        char = input_str[i]
-
-        if char in ['"', "'"] and not in_quotes:
-            in_quotes = True
-            quote_char = char
-            current_cmd += char
-        elif char == quote_char and in_quotes:
-            in_quotes = False
-            quote_char = None
-            current_cmd += char
-        elif char == "|" and not in_quotes:
-            commands.append(current_cmd.strip())
-            current_cmd = ""
-        else:
-            current_cmd += char
-
-        i += 1
-
-    if current_cmd.strip():
-        commands.append(current_cmd.strip())
-
-    return commands
-
-
-def execute_builtin_in_pipeline(command: str, args: str, stdin_fd=None, stdout_fd=None):
-    pid = os.fork()
-    if pid == 0:
-        if stdin_fd is not None:
-            os.dup2(stdin_fd, 0)
-
-        if stdout_fd is not None:
-            os.dup2(stdout_fd, 1)
-
-        builtin = BuiltinFactory.create(command)
-        if builtin:
-            builtin.execute(args)
-
-        os._exit(0)
-    else:
-        return pid
-
-
-def execute_pipeline(commands: List[str]):
-    if len(commands) == 1:
-        run_single_command(commands[0])
-        return
-
-    pipes = []
-    for i in range(len(commands) - 1):
-        r_fd, w_fd = os.pipe()
-        pipes.append((r_fd, w_fd))
-
-    processes = []
-
-    try:
-        for i, cmd in enumerate(commands):
-            command, args, tokens = parse_input(cmd)
-
-            stdin_fd = pipes[i - 1][0] if i > 0 else None
-            stdout_fd = pipes[i][1] if i < len(commands) - 1 else None
-
-            if BuiltinFactory.is_builtin(command):
-                pid = execute_builtin_in_pipeline(command, args, stdin_fd, stdout_fd)
-                processes.append(pid)
-                continue
-
-            path = shutil.which(command)
-            if not path:
-                print(f"{command}: command not found")
-                # Clean up pipes and processes
-                for r_fd, w_fd in pipes:
-                    try:
-                        os.close(r_fd)
-                        os.close(w_fd)
-                    except:
-                        pass
-                for pid in processes:
-                    try:
-                        os.kill(pid, signal.SIGTERM)
-                        os.waitpid(pid, 0)
-                    except:
-                        pass
-                return
-
-            pid = os.fork()
-            if pid == 0:
-                if stdin_fd is not None:
-                    os.dup2(stdin_fd, 0)
-
-                if stdout_fd is not None:
-                    os.dup2(stdout_fd, 1)
-
-                for r_fd, w_fd in pipes:
-                    try:
-                        os.close(r_fd)
-                        os.close(w_fd)
-                    except:
-                        pass
-
-                try:
-                    os.execv(path, tokens)
-                except Exception as e:
-                    print(f"Error executing {command}: {e}")
-                    os._exit(1)
-            else:
-                processes.append(pid)
-
-        for r_fd, w_fd in pipes:
-            try:
-                os.close(r_fd)
-                os.close(w_fd)
-            except:
-                pass
-
-        for pid in processes:
-            try:
-                os.waitpid(pid, 0)
-            except OSError:
-                pass
-
-    except Exception as e:
-        print(f"Pipeline error: {e}")
-        for r_fd, w_fd in pipes:
-            try:
-                os.close(r_fd)
-                os.close(w_fd)
-            except:
-                pass
-        for pid in processes:
-            try:
-                os.kill(pid, signal.SIGTERM)
-                os.waitpid(pid, 0)
-            except:
-                pass
-
-
-def run_single_command(input_str: str):
-    stdout_file = None
-    stderr_file = None
-    stdout_append = False
-    stderr_append = False
-
-    if "2>>" in input_str:
-        parts = input_str.split("2>>")
-        cmd_part = parts[0].strip()
-        stderr_file = parts[1].strip() if len(parts) > 1 else ""
-        stderr_append = True
-        input_str = cmd_part
-    elif "2>" in input_str:
-        parts = input_str.split("2>")
-        cmd_part = parts[0].strip()
-        stderr_file = parts[1].strip() if len(parts) > 1 else ""
-        stderr_append = False
-        input_str = cmd_part
-
-    if "1>>" in input_str:
-        parts = input_str.split("1>>")
-        cmd_part = parts[0].strip()
-        stdout_file = parts[1].strip() if len(parts) > 1 else ""
-        stdout_append = True
-    elif "1>" in input_str:
-        parts = input_str.split("1>")
-        cmd_part = parts[0].strip()
-        stdout_file = parts[1].strip() if len(parts) > 1 else ""
-        stdout_append = False
-    elif ">>" in input_str:
-        parts = input_str.split(">>")
-        cmd_part = parts[0].strip()
-        stdout_file = parts[1].strip() if len(parts) > 1 else ""
-        stdout_append = True
-    elif ">" in input_str:
-        parts = input_str.split(">")
-        cmd_part = parts[0].strip()
-        stdout_file = parts[1].strip() if len(parts) > 1 else ""
-        stdout_append = False
-    else:
-        cmd_part = input_str
-
-    command, args, tokens = parse_input(cmd_part)
-    if not command:
-        return
-
-    if BuiltinFactory.is_builtin(command):
-        original_stdout = None
-        original_stderr = None
-
-        try:
-            if stdout_file:
-                original_stdout = os.dup(1)
-                stdout_handle = open(stdout_file, "a" if stdout_append else "w")
-                os.dup2(stdout_handle.fileno(), 1)
-                stdout_handle.close()
-
-            if stderr_file:
-                original_stderr = os.dup(2)
-                stderr_handle = open(stderr_file, "a" if stderr_append else "w")
-                os.dup2(stderr_handle.fileno(), 2)
-                stderr_handle.close()
-
-            builtin = BuiltinFactory.create(command)
-            if builtin:
-                builtin.execute(args)
-
-        finally:
-            if original_stdout is not None:
-                os.dup2(original_stdout, 1)
-                os.close(original_stdout)
-            if original_stderr is not None:
-                os.dup2(original_stderr, 2)
-                os.close(original_stderr)
-        return
-
-    path = shutil.which(command)
-    if not path:
-        print(f"{command}: command not found")
-        return
-
-    try:
-        stdout_handle = None
-        stderr_handle = None
-
-        if stdout_file:
-            stdout_handle = open(stdout_file, "a" if stdout_append else "w")
-        if stderr_file:
-            stderr_handle = open(stderr_file, "a" if stderr_append else "w")
-        subprocess.run(
-            tokens,
-            stdout=stdout_handle if stdout_handle else None,
-            stderr=stderr_handle if stderr_handle else None,
-        )
-
-        if stdout_handle:
-            stdout_handle.close()
-        if stderr_handle:
-            stderr_handle.close()
-
-    except Exception as e:
-        print(f"Error: {e}")
-
-
-def run_external_command(input_str: str):
-    if "|" in input_str:
-        commands = parse_pipeline(input_str)
-        execute_pipeline(commands)
-    else:
-        run_single_command(input_str)
-
-
-# Shell loop
-if __name__ == "__main__":
-    setup_readline()
-    while True:
-        try:
-            last_completion_text = ""
-            completion_count = 0
-            input_str = input("$ ").strip()
-            if not input_str:
-                continue
-            readline.add_history(input_str)
-            command_history.append(input_str)
-
-            if "|" in input_str:
-                run_external_command(input_str)
-            else:
-                [command, args, tokens] = parse_input(input_str)
-                if BuiltinFactory.is_builtin(command):
-                    builtin = BuiltinFactory.create(command)
-                    if builtin:
-                        builtin.execute(args)
-                else:
-                    run_external_command(input_str)
-        except EOFError:
-            break
-        except KeyboardInterrupt:
             print()
+            print("  ".join(matches))
+            sys.stdout.write(f"$ {text}")
+            sys.stdout.flush()
+            return text
+
+    if state < len(matches):
+        return matches[0] + " "
+
+
+def run_external_program(command, args):
+
+    executable_path = find_executable(command)
+    result = subprocess.run([command] + args, executable=executable_path)
+
+
+def change_dir(args):
+    try:
+        if args[0] == "~":
+            os.chdir(os.environ.get("HOME", ""))
+        else:
+            os.chdir(args[0])
+    except:
+        print(f"cd: {args[0]}: No such file or directory")
+    return
+
+
+def echo_command(args):
+    try:
+        print(" ".join(args))
+
+        return 1
+    except:
+        return 0
+
+
+def history_command(args, history_stack):
+    if "-r" in args:
+        try:
+            # print(args[1])
+            with open(args[1], "r", encoding="utf-8") as f:
+                for i, line in enumerate(f.readlines()):
+                    history_stack.append(line.strip())
+        except FileNotFoundError:
+            print("Could not find file")
+    elif "-w" in args:
+        try:
+            with open(args[1], "w") as f:
+                for line in history_stack:
+                    f.write(line + "\n")
+        except:
+            print("Something went wrong in writing into file")
+    else:
+        starting_index = 0
+        if len(args) > 0:
+            try:
+                starting_index = len(history_stack) - int(args[0])
+            except:
+                print("Invalid args")
+        for i in range(starting_index, len(history_stack)):
+            print(f"\t{i}  {history_stack[i]}")
+
+
+def main():
+    history_stack = []
+    while True:
+        # sys.stdout.write("$ ")
+        curr_input = input("$ ").strip()
+        if not curr_input:
+            continue
+
+        if curr_input != "":
+            history_stack.append(curr_input)
+            readline.add_history(curr_input)
+
+        temp = shlex.split(curr_input)
+        command, args = temp[0], temp[1:]
+
+        built_in_functions = ["exit", "echo", "type", "pwd", "history"]
+
+        if "|" in curr_input:
+            subprocess.call(curr_input, shell=True)
+            # commands = [cmd.strip() for cmd in curr_input.split('|')]
+            # execute_pipeline(commands)
+        elif command == "history":
+            history_command(args, history_stack)
+
+        elif command == "exit":
+            try:
+                return int(args[0])
+            except:
+                print("unknown status")
+        elif ">" in curr_input or "1>" in curr_input:
+            os.system(curr_input)
+        elif command == "echo":
+            try:
+                echo_command(args)
+            except:
+                print("")
+        elif command == "type":
+            if args[0] in built_in_functions:
+                print(f"{args[0]} is a shell builtin")
+            elif (full_path := find_executable(args[0])) is not None:
+                print(f"{args[0]} is {full_path}")
+            else:
+                print(f"{args[0]}: not found")
+
+        elif command == "pwd":
+            print(os.getcwd())
+        elif command == "cd":
+            change_dir(args)
+        elif find_executable(command):
+            run_external_program(command, args)
+        else:
+            # attempt executable
+            try:
+                run_external_program(command, args)
+            except:
+                print(f"{command}: command not found")
+
+
+if __name__ == "__main__":
+
+    readline.parse_and_bind("tab: complete")
+    readline.set_completer(completer)
+    # attempt to set the auto history to false because it doesn't work on Windows for some reason
+    try:
+        readline.set_auto_history(False)
+    except:
+        pass
+    main()
