@@ -122,12 +122,27 @@ def run_builtin(command, args, stdout_stream, stderr_stream):
             print(f"{name}: not found", file=stdout_stream)
 
     elif command == "history":
+        # history <n>
+        if args:
+            try:
+                n = int(args[0])
+            except ValueError:
+                print(f"history: {args[0]}: numeric argument required", file=stderr_stream)
+                return
+
+            # Slice last n commands
+            start_idx = max(0, len(HISTORY) - n)
+            for idx in range(start_idx, len(HISTORY)):
+                print(f"{idx + 1:5d}  {HISTORY[idx]}", file=stdout_stream)
+            return
+
+        # history → full list
         for idx, entry in enumerate(HISTORY, start=1):
             print(f"{idx:5d}  {entry}", file=stdout_stream)
 
 
 # ----------------------------------------------------------------------
-# RUN SINGLE COMMAND (NO PIPE)
+# RUN SINGLE COMMAND
 # ----------------------------------------------------------------------
 def run_single(tokens):
     argv, out, out_app, err, err_app = parse_redirections(tokens)
@@ -146,6 +161,7 @@ def run_single(tokens):
         if out:
             out_f = open(out, "a" if out_app else "w")
             stdout_stream = out_f
+
         if err:
             err_f = open(err, "a" if err_app else "w")
             stderr_stream = err_f
@@ -168,7 +184,7 @@ def run_single(tokens):
 
 
 # ----------------------------------------------------------------------
-# PIPELINE SPLITTER
+# PIPELINE SPLIT
 # ----------------------------------------------------------------------
 def split_pipeline(tokens):
     stages = [[]]
@@ -181,12 +197,12 @@ def split_pipeline(tokens):
 
 
 # ----------------------------------------------------------------------
-# RUN PIPELINE (MULTI-STAGE)
+# MULTI-STAGE PIPELINE EXECUTION
 # ----------------------------------------------------------------------
 def run_pipeline(tokens):
     stages = split_pipeline(tokens)
 
-    # Special case: last is builtin "type"
+    # Special case: last stage is builtin "type"
     if stages[-1] and stages[-1][0] == "type":
         argv, _, _, _, _ = parse_redirections(stages[-1])
         if argv:
@@ -230,7 +246,7 @@ def run_pipeline(tokens):
 
 
 # ----------------------------------------------------------------------
-# MAIN REPL
+# MAIN SHELL LOOP
 # ----------------------------------------------------------------------
 def main():
     while True:
@@ -249,7 +265,7 @@ def main():
         if not line:
             continue
 
-        # ADD TO HISTORY HERE
+        # Store full raw command into history
         HISTORY.append(line)
 
         try:
